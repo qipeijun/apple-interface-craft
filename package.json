@@ -1,0 +1,26 @@
+{
+  "name": "apple-interface-craft",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Apple 设计与交互理念驱动的跨平台界面 Skill 与交互演示",
+  "license": "MIT",
+  "scripts": {
+    "dev": "live-server docs --host=127.0.0.1 --port=5500 --no-browser",
+    "test": "node tests/structure.cjs && node tests/interactions.cjs"
+  },
+  "engines": {
+    "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
+  },
+  "devDependencies": {
+    "jsdom": "30.1.1",
+    "live-server": "1.2.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/qipeijun/apple-interface-craft.git"
+  },
+  "bugs": {
+    "url": "https://github.com/qipeijun/apple-interface-craft/issues"
+  },
+  "homepage": "https://github.com/qipeijun/apple-interface-craft#readme"
+}
