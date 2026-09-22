@@ -19,8 +19,21 @@ const dom = new JSDOM(
         observe() {}
         unobserve() {}
       };
-      window.HTMLElement.prototype.animate = () => ({ cancel() {} });
-      window.HTMLElement.prototype.getAnimations = () => [];
+      // 只模拟动画生命周期，用于检查中断与偏好切换；不模拟视觉插值。
+      const animations = new WeakMap();
+      window.HTMLElement.prototype.animate = function () {
+        const element = this;
+        const animation = {
+          cancel() {
+            animations.set(element, (animations.get(element) || []).filter((item) => item !== animation));
+          },
+        };
+        animations.set(element, [...(animations.get(element) || []), animation]);
+        return animation;
+      };
+      window.HTMLElement.prototype.getAnimations = function () {
+        return animations.get(this) || [];
+      };
       // jsdom 不实现原生模态窗口与焦点限制；这里只替代开关以检查业务状态。
       window.HTMLDialogElement.prototype.showModal = function () {
         this.open = true;
@@ -73,6 +86,18 @@ d.querySelectorAll("[data-platform]").forEach((button) => {
   assert.equal(button.getAttribute("aria-pressed"), "true");
   assert.ok($("platform-title").textContent);
 });
+const desktopChoice = d.querySelector('[data-platform="desktop"]');
+const miniChoice = d.querySelector('[data-platform="mini"]');
+const platformAnimation = $("platform-copy").getAnimations()[0];
+desktopChoice.click();
+assert.equal($("platform-copy").getAnimations()[0], platformAnimation);
+miniChoice.click();
+assert.equal($("platform-device").dataset.shape, "mobile");
+assert.equal($("platform-copy").getAnimations().length, 1);
+assert.notEqual($("platform-copy").getAnimations()[0], platformAnimation);
+desktopChoice.click();
+assert.equal($("platform-device").dataset.shape, "desktop");
+assert.equal($("platform-copy").getAnimations().length, 1);
 assert.equal($("motion-detail").hidden, true);
 $("motion-toggle").click();
 assert.equal($("motion-detail").hidden, false);
@@ -80,6 +105,11 @@ $("motion-toggle").click();
 assert.equal($("motion-detail").hidden, true);
 $("reduce-motion").click();
 assert.equal(d.documentElement.dataset.motion, "reduce");
+assert.equal($("platform-copy").getAnimations().length, 0);
+miniChoice.click();
+assert.equal($("platform-device").dataset.shape, "mobile");
+assert.match($("platform-title").textContent, /宿主/);
+assert.equal($("platform-copy").getAnimations().length, 0);
 $("motion-toggle").click();
 assert.equal($("motion-detail").hidden, false);
 $("reduce-motion").click();
@@ -164,4 +194,74 @@ assert.deepEqual(errors, []);
 console.log(
   "PASS: glass/solid toggle; scene choice; continuous zoom; editor save/cancel/Escape intent/blank validation/focus return; repeat delete/undo; manual request error/retry/cancel/success. Native dialog focus trap and visual rendering not tested.",
 );
-dom.window.close();
+// 用户输入在重复选择、切换离开和返回时都应保留，包括主动清空的草稿。
+const componentPrompt = d.querySelector('[data-prompt="component"]');
+const designPrompt = d.querySelector('[data-prompt="design"]');
+componentPrompt.click();
+$("prompt-text").value = "为我的阅读应用优化筛选";
+$("prompt-text").dispatchEvent(new w.Event("input"));
+componentPrompt.click();
+assert.equal($("prompt-text").value, "为我的阅读应用优化筛选");
+designPrompt.click();
+$("prompt-text").value = "";
+$("prompt-text").dispatchEvent(new w.Event("input"));
+componentPrompt.click();
+assert.equal($("prompt-text").value, "为我的阅读应用优化筛选");
+designPrompt.click();
+assert.equal($("prompt-text").value, "");
+
+async function checkClipboard() {
+  const pending = [];
+  Object.defineProperty(w, "isSecureContext", { value: true });
+  Object.defineProperty(w.navigator, "clipboard", {
+    value: {
+      writeText(text) {
+        return new Promise((resolve, reject) => pending.push({ text, resolve, reject }));
+      },
+    },
+  });
+  // 等待事件处理函数中的异步复制完成，不使用固定延时模拟结果。
+  const flush = () => new Promise((resolve) => setImmediate(resolve));
+  $("prompt-text").value = "A";
+  $("copy-prompt").click();
+  assert.equal(pending[0].text, "A");
+  $("prompt-text").value = "B";
+  $("prompt-text").dispatchEvent(new w.Event("input"));
+  pending.shift().resolve();
+  await flush();
+  assert.equal($("copy-status").textContent, "");
+
+  $("copy-prompt").click();
+  componentPrompt.click();
+  componentPrompt.focus();
+  pending.shift().reject(new Error("权限拒绝"));
+  await flush();
+  assert.equal($("copy-status").textContent, "");
+  assert.equal(d.activeElement, componentPrompt);
+
+  $("copy-prompt").click();
+  $("copy-prompt").click();
+  pending[1].resolve();
+  await flush();
+  assert.match($("copy-status").textContent, /已复制/);
+  pending[0].reject(new Error("旧操作失败"));
+  await flush();
+  assert.match($("copy-status").textContent, /已复制/);
+  pending.length = 0;
+
+  $("copy-prompt").click();
+  pending.shift().reject(new Error("权限拒绝"));
+  await flush();
+  assert.match($("copy-status").textContent, /系统复制命令/);
+  assert.equal(d.activeElement, $("prompt-text"));
+  assert.deepEqual(errors, []);
+  console.log("PASS：场景草稿保留、异步复制过期结果隔离、重复复制与权限失败恢复。");
+}
+checkClipboard().then(
+  () => dom.window.close(),
+  (error) => {
+    dom.window.close();
+    console.error(error);
+    process.exitCode = 1;
+  },
+);

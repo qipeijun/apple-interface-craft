@@ -788,8 +788,8 @@
         border-radius: 12px;
         box-shadow: 0 15px 30px #5d72992b;
         transition:
-          max-width 0.55s var(--ease),
-          border-radius 0.55s var(--ease);
+          max-width 0.36s var(--ease),
+          border-radius 0.36s var(--ease);
         height: 182px;
         overflow: hidden;
       }
@@ -821,9 +821,14 @@
       }
       .device-rail {
         width: 47px;
+        flex-shrink: 0;
         background: #f4f6fb;
         padding: 13px 8px;
-        transition: width 0.4s;
+        overflow: hidden;
+        transition:
+          width 0.36s var(--ease),
+          padding 0.36s var(--ease),
+          opacity 0.2s ease-out;
       }
       .device-rail i {
         display: block;
@@ -835,7 +840,7 @@
       .device[data-shape="mobile"] .device-rail {
         width: 0;
         padding: 0;
-        overflow: hidden;
+        opacity: 0;
       }
       .device-screen {
         padding: 16px;
@@ -863,11 +868,12 @@
       .platform-panel h3 {
         font-size: 23px;
         margin-bottom: 12px;
+        min-height: 2.4em;
       }
       .platform-panel p {
         font-size: 13px;
         color: #56667e;
-        min-height: 64px;
+        min-height: 7em;
       }
       .platform-tags {
         display: flex;
@@ -1803,9 +1809,6 @@
           height: 180px;
           margin-bottom: 20px;
         }
-        .platform-panel p {
-          min-height: 0;
-        }
         .platform-choices {
           margin: 22px 0 9px;
         }
@@ -2258,7 +2261,7 @@
       }
       .sample-record p {
         font-size: 10px;
-        color: #73829a;
+        color: #596a83;
         margin-top: 7px;
       }
       .sample-record .icon {
@@ -2373,7 +2376,7 @@
       }
       .example-note {
         font-size: 10px;
-        color: #718097;
+        color: #596a83;
         padding: 0 22px 20px;
       }
       .edit-dialog {
@@ -2455,9 +2458,9 @@
         min-height: 36px;
         padding: 7px 13px;
       }
-      .edit-help {
+      .dialog-main .edit-help {
         font-size: 10px;
-        color: #73839a;
+        color: #596a83;
         margin-top: 10px;
       }
       .demo-status-icon {
@@ -3078,7 +3081,7 @@
                 </div>
               </div>
             </div>
-            <div aria-live="polite" aria-atomic="true">
+            <div id="platform-copy" aria-live="polite" aria-atomic="true">
               <h3 id="platform-title">在浏览器里，自然地工作。</h3>
               <p id="platform-description">
                 从语义
@@ -3678,6 +3681,11 @@
               可以是一张页面、一段组件代码，或一个不够顺手的流程。说明平台与目标，让这个
               Skill 帮你把设计决策落到实处。
             </p>
+            <p style="margin-top: 20px">
+              首次使用？先按
+              <a href="https://github.com/qipeijun/apple-interface-craft#安装-skill" target="_blank" rel="noopener noreferrer" style="text-decoration: underline; text-underline-offset: 4px">安装说明 ↗</a>
+              添加 Skill，再新建会话确认助手能发现它，最后复制提示词开始。
+            </p>
           </div>
           <div>
             <div class="prompt-options" role="group" aria-label="选择调用场景">
@@ -3833,10 +3841,10 @@
         document.documentElement.dataset.motion = reduceMotion()
           ? "reduce"
           : "full";
-        if (reduceMotion())
-          $("project-list")
-            .getAnimations()
-            .forEach((animation) => animation.cancel());
+        if (reduceMotion()) {
+          for (const id of ["project-list", "platform-copy"])
+            $(id).getAnimations().forEach((animation) => animation.cancel());
+        }
         $("reduce-motion").checked = reduceMotion();
         $("reduce-motion").disabled = motionPreference.matches;
         $("motion-preference").textContent = motionPreference.matches
@@ -3915,7 +3923,13 @@
       }
       document.querySelectorAll("[data-platform]").forEach((button) =>
         button.addEventListener("click", () => {
+          if (button.getAttribute("aria-pressed") === "true") return;
           const data = platforms[button.dataset.platform];
+          const copy = $("platform-copy");
+          const animations = copy.getAnimations();
+          // 快速切换从当前透明度接续；内容和选中态立即生效，不等待动画完成。
+          const opacity = animations.length ? getComputedStyle(copy).opacity : 0.6;
+          animations.forEach((animation) => animation.cancel());
           pressGroup("[data-platform]", button);
           $("platform-device").dataset.shape = data.shape;
           $("platform-title").textContent = data.title;
@@ -3927,6 +3941,11 @@
               return span;
             }),
           );
+          if (!reduceMotion())
+            copy.animate([{ opacity }, { opacity: 1 }], {
+              duration: 180,
+              easing: "ease-out",
+            });
         }),
       );
       const projects = [
@@ -4128,18 +4147,30 @@
         review:
           "使用 $apple-interface-craft 审查【页面或组件】的交互。重点检查任务完成、误操作、状态一致性、返回上下文与无障碍。结合实际证据说明影响、最小修复方向和需要的验证。本次只审查，不修改。",
       };
+      // 每个调用场景保留独立草稿；切换和重复选择都不覆盖用户输入。
+      const promptDrafts = { ...prompts };
+      let activePrompt = "component";
+      // 编辑或切换使旧复制结果失效；后一次复制优先于先前未完成的操作。
+      let copyRevision = 0;
       document.querySelectorAll("[data-prompt]").forEach((button) =>
         button.addEventListener("click", () => {
+          if (button.dataset.prompt === activePrompt) return;
+          promptDrafts[activePrompt] = $("prompt-text").value;
+          activePrompt = button.dataset.prompt;
+          copyRevision++;
           pressGroup("[data-prompt]", button);
-          $("prompt-text").value = prompts[button.dataset.prompt];
+          $("prompt-text").value = promptDrafts[activePrompt];
           $("copy-status").textContent = "";
         }),
       );
       $("prompt-text").addEventListener("input", () => {
+        copyRevision++;
         $("copy-status").textContent = "";
       });
       $("copy-prompt").addEventListener("click", async () => {
         const promptText = $("prompt-text");
+        const revision = ++copyRevision;
+        const text = promptText.value;
         // 本地文件的剪贴板权限因浏览器而异；失败时保留原文并提供明确的手动复制路径。
         if (!navigator.clipboard || !window.isSecureContext) {
           promptText.focus();
@@ -4148,9 +4179,11 @@
           return;
         }
         try {
-          await navigator.clipboard.writeText(promptText.value);
+          await navigator.clipboard.writeText(text);
+          if (revision !== copyRevision) return;
           $("copy-status").textContent = "已复制，可粘贴到任务中。";
         } catch {
+          if (revision !== copyRevision) return;
           promptText.focus();
           promptText.select();
           $("copy-status").textContent =
